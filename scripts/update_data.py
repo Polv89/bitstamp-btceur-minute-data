@@ -7,9 +7,9 @@ import pandas as pd
 import requests
 
 # Configuration
-CURRENCY_PAIR = "btcusd"
-BULK_DATA_PATH = "data/historical/btcusd_bitstamp_1min_2012-2025.csv"
-DAILY_DATA_PATH = "data/updates/btcusd_bitstamp_1min_latest.csv"
+CURRENCY_PAIR = "btceur"
+BULK_DATA_PATH = "data/historical/btceur_bitstamp_1min_2012-2025.csv"
+DAILY_DATA_PATH = "data/updates/btceur_bitstamp_1min_latest.csv"
 COLUMN_NAMES = ["timestamp", "open", "high", "low", "close", "volume"]
 
 # Configure logging
