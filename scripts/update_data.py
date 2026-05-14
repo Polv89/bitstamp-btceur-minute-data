@@ -274,8 +274,7 @@ if __name__ == "__main__":
         updated_daily_df.to_csv(DAILY_DATA_PATH, index=False)
         logger.info(
             f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}"
-        logger.info(f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}")
-
+        
     # Storico Giornaliero:
     daily_resampled = updated_daily_df.copy()
     daily_resampled['datetime'] = pd.to_datetime(daily_resampled['timestamp'], unit='s', utc=True)
