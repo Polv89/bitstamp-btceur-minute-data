@@ -58,36 +58,19 @@ jobs:
             echo "RESET_PREVIOUS_COMMIT=false" >> $GITHUB_ENV
           fi
 
-      # Step 7: Commit and push updates
-      - name: Commit and Push Updates
+      # Step 7: Commit and push solo i CSV giornalieri
+      - name: Commit and Push Daily Updates
         if: env.SCRIPT_SUCCESS == 'true'
         run: |
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
-
           if [ "$RESET_PREVIOUS_COMMIT" == "true" ]; then
             git reset HEAD~
           fi
-
-          # Comprimi i file al minuto (grandi) e aggiungili
-          for pair in btceur btcusd; do
-            minute_file="data/updates/${pair}_bitstamp_1min_latest.csv"
-            if [ -f "$minute_file" ]; then
-              gzip -f "$minute_file"
-              git add "${minute_file}.gz"
-            fi
-          done
-
-          # Aggiungi i file giornalieri (piccoli, senza compressione)
-          for pair in btceur btcusd; do
-            daily_file="data/updates/${pair}_bitstamp_daily.csv"
-            if [ -f "$daily_file" ]; then
-              git add "$daily_file"
-            fi
-          done
-
+          # Aggiungi SOLO i file giornalieri (ignora i CSV al minuto)
+          git add data/updates/btceur_bitstamp_daily.csv
+          git add data/updates/btcusd_bitstamp_daily.csv
           git commit -m ":package: Daily update: $(date -u +'%Y-%m-%d')"
-
           if [ "$RESET_PREVIOUS_COMMIT" == "true" ]; then
             git push -f origin main
           else
