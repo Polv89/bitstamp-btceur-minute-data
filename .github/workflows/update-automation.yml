@@ -14,8 +14,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          lfs: false # No need to fetch the bulk data for this workflow
-          fetch-depth: 2 # Fetch enough history to reference HEAD~
+          lfs: false
+          fetch-depth: 2
 
       # Step 2: Set up Python 3.12
       - name: Set up Python 3.12
@@ -27,7 +27,7 @@ jobs:
       - name: Install Poetry
         shell: bash
         run: |
-          pipx install poetry==2.1.1  --python python3.12
+          pipx install poetry==2.1.1 --python python3.12
           echo $PIPX_BIN_DIR >> $GITHUB_PATH
 
       # Step 4: Install project dependencies using Poetry
@@ -40,7 +40,7 @@ jobs:
         run: |
           set -o pipefail
           poetry run python scripts/update_data.py 2>&1 | tee script_output.log
-          if grep -q "Successfully saved" script_output.log; then
+          if grep -q "Saved.*daily records" script_output.log; then
             echo "SCRIPT_SUCCESS=true" >> $GITHUB_ENV
           else
             echo "SCRIPT_SUCCESS=false" >> $GITHUB_ENV
@@ -58,22 +58,38 @@ jobs:
             echo "RESET_PREVIOUS_COMMIT=false" >> $GITHUB_ENV
           fi
 
-      # Step 7: Commit and force push if previous commit was a daily update
+      # Step 7: Commit and push updates
       - name: Commit and Push Updates
         if: env.SCRIPT_SUCCESS == 'true'
         run: |
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
+
           if [ "$RESET_PREVIOUS_COMMIT" == "true" ]; then
-            git reset HEAD~ # Drop the previous commit
+            git reset HEAD~
           fi
-          gzip -f data/updates/btceur_bitstamp_1min_latest.csv
-          git add data/updates/btceur_bitstamp_1min_latest.csv
-          git add data/updates/btceur_bitstamp_1min_latest.csv.gz
-          git add data/updates/btceur_bitstamp_daily.csv
+
+          # Comprimi i file al minuto (grandi) e aggiungili
+          for pair in btceur btcusd; do
+            minute_file="data/updates/${pair}_bitstamp_1min_latest.csv"
+            if [ -f "$minute_file" ]; then
+              gzip -f "$minute_file"
+              git add "${minute_file}.gz"
+            fi
+          done
+
+          # Aggiungi i file giornalieri (piccoli, senza compressione)
+          for pair in btceur btcusd; do
+            daily_file="data/updates/${pair}_bitstamp_daily.csv"
+            if [ -f "$daily_file" ]; then
+              git add "$daily_file"
+            fi
+          done
+
           git commit -m ":package: Daily update: $(date -u +'%Y-%m-%d')"
+
           if [ "$RESET_PREVIOUS_COMMIT" == "true" ]; then
-            git push -f origin main # Force push to overwrite the previous commit
+            git push -f origin main
           else
             git push origin main
           fi
