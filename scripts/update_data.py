@@ -283,6 +283,5 @@ if __name__ == "__main__":
     ).dropna().reset_index()
     daily_resampled.to_csv('data/updates/btceur_bitstamp_daily.csv', index=False)
     logger.info(f"Saved {len(daily_resampled)} daily records to data/updates/btceur_bitstamp_daily.csv")
-        )
     else:
         logger.info("No missing data to fetch")
