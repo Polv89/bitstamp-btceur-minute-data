@@ -273,7 +273,7 @@ if __name__ == "__main__":
         os.makedirs(os.path.dirname(DAILY_DATA_PATH), exist_ok=True)
         updated_daily_df.to_csv(DAILY_DATA_PATH, index=False)
         logger.info(
-            f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}"
+            f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}")
         
     # Storico Giornaliero:
     daily_resampled = updated_daily_df.copy()
