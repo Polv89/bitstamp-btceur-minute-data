@@ -139,7 +139,8 @@ def fetch_and_append_missing_data(
             logger.warning(
                 f"No data retrieved for interval {start_timestamp} to {window_end}"
             )
-            break
+            start_timestamp = window_end + 60
+            continue
 
     if all_new_data:
         logger.debug(f"Merging {len(all_new_data)} intervals of new data")
