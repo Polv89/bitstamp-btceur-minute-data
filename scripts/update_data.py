@@ -7,24 +7,25 @@ import pandas as pd
 import requests
 
 # Configuration
-CURRENCY_PAIR = "btceur"
-BULK_DATA_PATH = "data/historical/btceur_bitstamp_1min_2012-2025.csv"
-DAILY_DATA_PATH = "data/updates/btceur_bitstamp_1min_latest.csv"
+CURRENCY_PAIRS = ["btceur", "btcusd"]  # entrambi i pair
+DAILY_MINUTE_PATHS = {
+    "btceur": "data/updates/btceur_bitstamp_1min_latest.csv",
+    "btcusd": "data/updates/btcusd_bitstamp_1min_latest.csv",
+}
+DAILY_OHLC_PATHS = {
+    "btceur": "data/updates/btceur_bitstamp_daily.csv",
+    "btcusd": "data/updates/btcusd_bitstamp_daily.csv",
+}
 COLUMN_NAMES = ["timestamp", "open", "high", "low", "close", "volume"]
 
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-# Add console handler
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
-
-# Add handler to logger
 logger.addHandler(console_handler)
 
 
-# Function to fetch data from Bitstamp API
 def fetch_bitstamp_data(
     currency_pair: str,
     start_timestamp: int,
@@ -34,254 +35,137 @@ def fetch_bitstamp_data(
 ) -> List[dict]:
     url = f"https://www.bitstamp.net/api/v2/ohlc/{currency_pair}/"
     params = {
-        "step": step,  # 60 seconds (1-minute interval)
+        "step": step,
         "start": start_timestamp,
         "end": end_timestamp,
-        "limit": limit,  # Fetch 1000 data points max per request
+        "limit": limit,
     }
     try:
-        logger.debug(f"Fetching data from {url} with params: {params}")
         response = requests.get(url, params=params, timeout=60)
         response.raise_for_status()
         return response.json().get("data", {}).get("ohlc", [])
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching data: {e}")
+        logger.error(f"Error fetching data for {currency_pair}: {e}")
         return []
 
 
-# Ensure at least one dataset exists
-def ensure_data() -> None:
-    if not os.path.exists(DAILY_DATA_PATH):
-        if not os.path.exists(BULK_DATA_PATH):
-            logger.error(
-                f"Neither bulk dataset ({BULK_DATA_PATH}) nor daily dataset ({DAILY_DATA_PATH}) found.\n"
-                f"Please ensure data is unzipped and present at {BULK_DATA_PATH} for first run."
-            )
-            exit(1)
-        else:
-            logger.info(
-                f"Daily dataset ({DAILY_DATA_PATH}) not found. Assuming this is first run."
-            )
+def ensure_seed_files() -> None:
+    """Create seed files for both pairs if they don't exist."""
+    seed_timestamp = 1293840000  # 2011-01-01
+    seed_line = f"{seed_timestamp},0.0,0.0,0.0,0.0,0.0\n"
+    header = "timestamp,open,high,low,close,volume\n"
+    for pair in CURRENCY_PAIRS:
+        path = DAILY_MINUTE_PATHS[pair]
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(header + seed_line)
+            logger.info(f"Created seed file {path}")
 
 
-# Check for missing data since the last update
 def check_missing_intervals(df: pd.DataFrame) -> Tuple[int, int]:
     last_timestamp = int(df["timestamp"].max())
-    logger.debug(f"Last timestamp: {last_timestamp}")
-
-    # Round current timestamp down to the nearest minute
     current_timestamp = int(
         datetime.now(timezone.utc).replace(second=0, microsecond=0).timestamp()
-    )
-    # We subtract 60 seconds to avoid fetching the current minute, which is subject to change
-    current_timestamp -= 60
-
+    ) - 60
     if last_timestamp >= current_timestamp:
         logger.info(
-            f"Data is already up to date (last_timestamp: {last_timestamp}, current_timestamp: {current_timestamp})"
+            f"Data already up to date (last_timestamp: {last_timestamp}, current_timestamp: {current_timestamp})"
         )
         return None
-
-    # Return a single interval from the last timestamp to the current timestamp
     return last_timestamp + 60, current_timestamp
 
 
-# Fetch and append missing data
 def fetch_and_append_missing_data(
-    currency_pair: str, missing_interval: Tuple[int, int], daily_df: pd.DataFrame
+    currency_pair: str,
+    missing_interval: Tuple[int, int],
+    existing_df: pd.DataFrame,
 ) -> pd.DataFrame:
     all_new_data = []
     start_timestamp, end_timestamp = missing_interval
-    logger.info(f"Missing data: from {start_timestamp} to {end_timestamp}")
+    logger.info(f"[{currency_pair}] Missing data: from {start_timestamp} to {end_timestamp}")
 
     while start_timestamp < end_timestamp:
-        # Calculate the number of minutes remaining
         remaining_minutes = (end_timestamp - start_timestamp) // 60
-        logger.debug(f"Remaining minutes to fetch: {remaining_minutes}")
-
-        # Because Bitstamp prioritises limit over start/end:
-        # Set the limit to the minimum of 1000 or the remaining minutes
         limit = min(1000, remaining_minutes)
-
         if limit <= 0:
-            logger.error(f"Limit is {limit}, breaking to prevent bad request")
             break
-
-        # Calculate window end - ensure `limit` records are fetched
         window_end = min(start_timestamp + ((limit - 1) * 60), end_timestamp)
 
-        logger.info(f"Fetching {limit} rows from {start_timestamp} to {window_end}")
-        new_data = fetch_bitstamp_data(
-            currency_pair, start_timestamp, window_end, limit=limit
-        )
+        logger.info(f"[{currency_pair}] Fetching {limit} rows from {start_timestamp} to {window_end}")
+        new_data = fetch_bitstamp_data(currency_pair, start_timestamp, window_end, limit=limit)
 
         if new_data:
-            logger.debug(
-                f"Retrieved {len(new_data)} records for interval {start_timestamp} to {window_end}"
-            )
             df_new = pd.DataFrame(new_data)
-
             df_new["timestamp"] = pd.to_numeric(df_new["timestamp"], errors="coerce")
-            logger.debug(
-                f"Timestamp range: {df_new['timestamp'].min()} to {df_new['timestamp'].max()}"
-            )
-
             df_new.columns = COLUMN_NAMES
-            logger.debug(f"Sample data:\n{df_new.head()}\n")
-
             all_new_data.append(df_new)
-
-            # Move to the next chunk using the last timestamp from the data
-            last_timestamp = int(df_new["timestamp"].max())
-            start_timestamp = last_timestamp + 60
-            logger.debug(f"Next chunk will start at timestamp {start_timestamp}")
+            last_ts = int(df_new["timestamp"].max())
+            start_timestamp = last_ts + 60
         else:
-            logger.warning(
-                f"No data retrieved for interval {start_timestamp} to {window_end}"
-            )
+            logger.warning(f"[{currency_pair}] No data for interval {start_timestamp}-{window_end}")
             start_timestamp = window_end + 60
             continue
 
     if all_new_data:
-        logger.debug(f"Merging {len(all_new_data)} intervals of new data")
-        updated_daily_df = pd.concat([daily_df] + all_new_data, ignore_index=True)
-        initial_rows = len(updated_daily_df)
-
-        # Log duplicate timestamps
-        duplicate_timestamps = updated_daily_df[
-            updated_daily_df.duplicated(subset="timestamp", keep=False)
-        ]
-        if not duplicate_timestamps.empty:
-            logger.info(
-                f"Duplicate timestamps detected: {duplicate_timestamps['timestamp'].tolist()}"
-            )
-
-        updated_daily_df.drop_duplicates(subset="timestamp", inplace=True)
-        duplicates_removed = initial_rows - len(updated_daily_df)
-        if duplicates_removed > 0:
-            logger.info(f"Removed {duplicates_removed} duplicate timestamps")
-        updated_daily_df.sort_values(by="timestamp", ascending=True, inplace=True)
-        logger.debug(f"Final dataset contains {len(updated_daily_df)} records")
-        return updated_daily_df
+        updated_df = pd.concat([existing_df] + all_new_data, ignore_index=True)
+        updated_df.drop_duplicates(subset="timestamp", inplace=True)
+        updated_df.sort_values("timestamp", ascending=True, inplace=True)
+        logger.info(f"[{currency_pair}] Total records after update: {len(updated_df)}")
+        return updated_df
     else:
-        logger.info("No new data found to append")
-        return daily_df
+        logger.info(f"[{currency_pair}] No new data found")
+        return existing_df
 
 
-# Validate data integrity
-def validate_data_integrity(df: pd.DataFrame) -> pd.DataFrame:
-    # Remove duplicates
-    initial_rows = len(df)
-    df.drop_duplicates(subset="timestamp", inplace=True)
-    duplicates_removed = initial_rows - len(df)
-    if duplicates_removed > 0:
-        logger.debug(f"Removed {duplicates_removed} duplicate timestamps")
+def resample_to_daily(minute_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert minute data to daily OHLCV, forcing numeric conversion to avoid string concatenation."""
+    df = minute_df.copy()
+    # Force numeric, coerce errors to NaN
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Check for missing minutes
-    df.sort_values(by="timestamp", ascending=True, inplace=True)
-    df.reset_index(drop=True, inplace=True)
-    expected_range = pd.date_range(
-        start=pd.to_datetime(df["timestamp"].min(), unit="s"),
-        end=pd.to_datetime(df["timestamp"].max(), unit="s"),
-        freq="min",
-    )
-    missing_minutes = expected_range.difference(
-        pd.to_datetime(df["timestamp"], unit="s")
-    )
-    if not missing_minutes.empty:
-        missing_timestamps = missing_minutes.astype(int) // 10**9  # Convert to Unix
-        logger.warning(f"Missing minutes detected: {missing_timestamps.tolist()}")
+    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s", utc=True)
+    df = df.set_index("datetime")
+    daily = df.resample("1D").agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum"
+    }).dropna()
+    daily.reset_index(inplace=True)
+    daily["volume"] = daily["volume"].round(8)  # pulizia
+    return daily
+
+
+def process_pair(pair: str) -> None:
+    """Full pipeline for one currency pair."""
+    minute_path = DAILY_MINUTE_PATHS[pair]
+    daily_path = DAILY_OHLC_PATHS[pair]
+
+    # Load existing minute data
+    df = pd.read_csv(minute_path)
+    logger.info(f"[{pair}] Loaded {len(df)} existing minute records")
+
+    # Check missing intervals
+    missing = check_missing_intervals(df)
+    if not missing:
+        logger.info(f"[{pair}] No missing data to fetch")
     else:
-        logger.info("No missing minutes detected")
+        df = fetch_and_append_missing_data(pair, missing, df)
+        # Validate and save updated minute data
+        os.makedirs(os.path.dirname(minute_path), exist_ok=True)
+        df.to_csv(minute_path, index=False)
+        logger.info(f"[{pair}] Saved {len(df)} minute records to {minute_path}")
 
-    # Check for nulls
-    if df.isnull().values.any():
-        logger.warning("Null values detected in the dataset")
-    else:
-        logger.info("No null values detected")
-
-    return df
-
-
-# Fill missing minutes using forward fill strategy
-def fill_missing_minutes(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.drop_duplicates(subset="timestamp", keep="last").copy()
-    df.set_index("timestamp", inplace=True)
-
-    # Create a complete range of timestamps
-    full_range = (
-        pd.date_range(
-            start=pd.to_datetime(df.index.min(), unit="s"),
-            end=pd.to_datetime(df.index.max(), unit="s"),
-            freq="min",
-        ).astype(int)
-        // 10**9
-    )  # Convert to seconds
-
-    # Reindex the DataFrame to include all timestamps
-    df = df.reindex(full_range)
-
-    # Forward fill the close values
-    df["close"] = df["close"].ffill()
-
-    # Fill open, high, low with the previous close value
-    df["open"] = df["open"].fillna(df["close"])
-    df["high"] = df["high"].fillna(df["close"])
-    df["low"] = df["low"].fillna(df["close"])
-
-    # Fill volume with zero
-    df["volume"] = df["volume"].fillna(0)
-
-    # Reset index to have timestamp as a column again
-    df.reset_index(inplace=True)
-    df.rename(columns={"index": "timestamp"}, inplace=True)
-
-    return df
+    # Generate daily OHLCV
+    daily_df = resample_to_daily(df)
+    daily_df.to_csv(daily_path, index=False)
+    logger.info(f"[{pair}] Saved {len(daily_df)} daily records to {daily_path}")
 
 
-# Main execution
 if __name__ == "__main__":
-    # Ensure data exists
-    ensure_data()
-
-    # Load datasets
-    if os.path.exists(DAILY_DATA_PATH):
-        df = pd.read_csv(DAILY_DATA_PATH)
-        logger.info(f"Loaded daily dataset with {len(df)} records")
-        daily_df = df
-    else:
-        df = pd.read_csv(BULK_DATA_PATH)
-        logger.info(f"Loaded bulk dataset with {len(df)} records")
-        daily_df = pd.DataFrame(columns=COLUMN_NAMES)  # Empty df for first run
-
-    # Check for missing intervals
-    missing_interval = check_missing_intervals(df)
-
-    if missing_interval:
-        # Fetch and append missing data
-        updated_daily_df = fetch_and_append_missing_data(
-            CURRENCY_PAIR, missing_interval, daily_df
-        )
-
-        # Fill missing minutes
-        #updated_daily_df = fill_missing_minutes(updated_daily_df)
-
-        # Validate data integrity
-        updated_daily_df = validate_data_integrity(updated_daily_df)
-
-        # Save the updated daily dataset
-        os.makedirs(os.path.dirname(DAILY_DATA_PATH), exist_ok=True)
-        updated_daily_df.to_csv(DAILY_DATA_PATH, index=False)
-        logger.info(
-            f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}")
-        
-    # Storico Giornaliero:
-        daily_resampled = updated_daily_df.copy()
-        daily_resampled['datetime'] = pd.to_datetime(daily_resampled['timestamp'], unit='s', utc=True)
-        daily_resampled = daily_resampled.set_index('datetime').resample('1D').agg(
-            {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}
-        ).dropna().reset_index()
-        daily_resampled.to_csv('data/updates/btceur_bitstamp_daily.csv', index=False)
-        logger.info(f"Saved {len(daily_resampled)} daily records to data/updates/btceur_bitstamp_daily.csv")
-    else:
-        logger.info("No missing data to fetch")
+    ensure_seed_files()
+    for pair in CURRENCY_PAIRS:
+        process_pair(pair)
