@@ -274,6 +274,16 @@ if __name__ == "__main__":
         updated_daily_df.to_csv(DAILY_DATA_PATH, index=False)
         logger.info(
             f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}"
+        logger.info(f"Successfully saved {len(updated_daily_df)} records to {DAILY_DATA_PATH}")
+
+    # Storico Giornaliero:
+    daily_resampled = updated_daily_df.copy()
+    daily_resampled['datetime'] = pd.to_datetime(daily_resampled['timestamp'], unit='s', utc=True)
+    daily_resampled = daily_resampled.set_index('datetime').resample('1D').agg(
+        {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'}
+    ).dropna().reset_index()
+    daily_resampled.to_csv('data/updates/btceur_bitstamp_daily.csv', index=False)
+    logger.info(f"Saved {len(daily_resampled)} daily records to data/updates/btceur_bitstamp_daily.csv")
         )
     else:
         logger.info("No missing data to fetch")
