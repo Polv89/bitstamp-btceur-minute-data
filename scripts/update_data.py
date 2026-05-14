@@ -263,7 +263,7 @@ if __name__ == "__main__":
         )
 
         # Fill missing minutes
-        updated_daily_df = fill_missing_minutes(updated_daily_df)
+        #updated_daily_df = fill_missing_minutes(updated_daily_df)
 
         # Validate data integrity
         updated_daily_df = validate_data_integrity(updated_daily_df)
