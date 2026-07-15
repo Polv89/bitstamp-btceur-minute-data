@@ -6,55 +6,33 @@ Keeps only the most recent data point - overwrites previous data.
 
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
 
 
 def generate_10min_data():
     """
-    Load all available data and keep only the latest price at 10-minute intervals.
+    Load the latest BTC/EUR data and extract only the latest price.
     """
     data_dir = Path("data")
     
-    # Load historical data
-    hist_file = data_dir / "historical" / "btceur_bitstamp_1min_2012-2025.csv.gz"
-    if hist_file.exists():
-        df_hist = pd.read_csv(hist_file, compression='gzip')
-    else:
-        print(f"⚠️  Historical file not found at {hist_file}")
-        df_hist = pd.DataFrame()
+    # Load recent updates (compressed file with 1-minute data)
+    updates_file = data_dir / "updates" / "btceur_bitstamp_1min_latest.csv.gz"
     
-    # Load recent updates
-    updates_file = data_dir / "updates" / "btceur_bitstamp_1min_latest.csv"
-    if updates_file.exists():
-        df_recent = pd.read_csv(updates_file)
-    else:
-        print(f"⚠️  Updates file not found at {updates_file}")
-        df_recent = pd.DataFrame()
-    
-    # Combine datasets
-    if not df_hist.empty and not df_recent.empty:
-        df = pd.concat([df_hist, df_recent], ignore_index=True)
-    elif not df_hist.empty:
-        df = df_hist.copy()
-    elif not df_recent.empty:
-        df = df_recent.copy()
-    else:
-        print("❌ Error: No data files found!")
+    if not updates_file.exists():
+        print(f"❌ File not found: {updates_file}")
         return
+    
+    # Read the compressed CSV
+    df = pd.read_csv(updates_file, compression='gzip')
     
     # Convert timestamp to datetime
     df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
-    
-    # Sort by datetime to ensure proper grouping
     df = df.sort_values('datetime').reset_index(drop=True)
     
-    # Round down to nearest 10-minute interval
+    # Group by 10-minute intervals and get the LAST price in each interval
     df['time_10min'] = df['datetime'].dt.floor('10min')
-    
-    # Group by 10-minute intervals and get the LAST (most recent) price
     df_10min = df.groupby('time_10min').agg({
-        'close': 'last',  # Get the last close price in each 10-min window
-        'timestamp': 'last'  # Get the corresponding timestamp
+        'close': 'last',
+        'timestamp': 'last'
     }).reset_index()
     
     # Rename columns
@@ -66,9 +44,9 @@ def generate_10min_data():
     # Format datetime
     df_10min['datetime'] = df_10min['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
     
-    # SELECT ONLY THE LAST ROW (latest data point)
+    # Keep ONLY the LAST row (latest data point)
     if len(df_10min) > 0:
-        df_10min = df_10min.iloc[[-1]]  # Keep only the last row
+        df_10min = df_10min.iloc[[-1]]
     
     # Select and reorder columns
     output_df = df_10min[['datetime', 'price', 'timestamp']]
@@ -80,7 +58,7 @@ def generate_10min_data():
     
     print("✅ Generated 10-minute data successfully!")
     print(f"📁 File: {output_file}")
-    print(f"\n📊 Latest data:")
+    print(f"\n📊 Latest BTC/EUR price:")
     print(output_df.to_string(index=False))
 
 
