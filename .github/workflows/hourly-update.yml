@@ -1,0 +1,36 @@
+name: Hourly BTC Data Update
+
+on:
+  schedule:
+    - cron: "0 0 * * *"  # ogni giorno alle 00:00 UTC
+  workflow_dispatch:
+
+jobs:
+  update-hourly-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas
+
+      - name: Run hourly data update
+        run: |
+          python scripts/update_hourly_data.py
+
+      - name: Commit and push updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/updates/*.csv
+          git commit -m ":package: Hourly BTC data update" || echo "No changes to commit"
+          git push origin main || echo "Push skipped"
